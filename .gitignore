@@ -1,4 +1,4 @@
 node_modules/
 sessions/
 data/users.json
-.env
+.envgit status

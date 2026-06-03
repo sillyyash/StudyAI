@@ -330,7 +330,7 @@ footer{background:var(--surface);border-top:1px solid var(--border);padding:3rem
 
 <!-- NAV -->
 <nav>
-  <div class="nav-logo">
+  <div class="nav-logo" onclick="showPage('landing')" style="cursor:pointer">
     <div class="logo-icon">S</div>
     StudyAI
   </div>
@@ -339,9 +339,16 @@ footer{background:var(--surface);border-top:1px solid var(--border);padding:3rem
     <li><a href="#" onclick="scrollToSection('testimonials')">Reviews</a></li>
     <li><a href="#" onclick="scrollToSection('faq')">FAQ</a></li>
   </ul>
-  <div class="nav-cta">
-    <button class="btn-ghost magnetic" onclick="showPage('auth')">Log in</button>
-    <button class="btn-primary magnetic" onclick="showPage('auth')">Get Started</button>
+  <div class="nav-cta" id="navCTA">
+    <button class="btn-ghost magnetic"
+            id="loginBtn">
+      Log in
+    </button>
+
+    <button class="btn-primary magnetic"
+            id="signupBtn">
+      Get Started
+    </button>
   </div>
 </nav>
 
@@ -500,9 +507,9 @@ footer{background:var(--surface);border-top:1px solid var(--border);padding:3rem
 <div id="auth" class="page">
   <div class="auth-container">
     <div class="auth-card">
+     <button class="btn-ghost" onclick="showPage('landing')" style="margin-bottom:1rem">← Back to Home</button>
       <div class="auth-header">
-        <div class="nav-logo" style="justify-content:center;margin-bottom:.75rem"><div class="logo-icon">S</div>StudyAI</div>
-        <h2>Welcome back</h2>
+        <div class="nav-logo" onclick="showPage('landing')" style="justify-content:center;margin-bottom:.75rem;cursor:pointer"><div class="logo-icon">S</div>StudyAI</div>        <h2>Welcome back</h2>
         <p>Sign in to your study dashboard</p>
       </div>
       <div class="auth-tabs">
@@ -755,15 +762,15 @@ footer{background:var(--surface);border-top:1px solid var(--border);padding:3rem
           </div>
           <div class="setting-row">
             <div class="setting-info"><h4>Email Notifications</h4><p>Weekly progress summary</p></div>
-            <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+            <div class="toggle on" id="prefNotifications" onclick="this.classList.toggle('on');savePreferences()"></div>
           </div>
           <div class="setting-row">
             <div class="setting-info"><h4>Study Reminders</h4><p>Daily reminder to study</p></div>
-            <div class="toggle" onclick="this.classList.toggle('on')"></div>
+            <div class="toggle" id="prefReminders" onclick="this.classList.toggle('on');savePreferences()"></div>
           </div>
           <div class="setting-row">
             <div class="setting-info"><h4>AI Suggestions</h4><p>Smart study recommendations</p></div>
-            <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+            <div class="toggle on" id="prefAiSuggestions" onclick="this.classList.toggle('on');savePreferences()"></div>
           </div>
         </div>
         <div class="panel">
@@ -774,7 +781,7 @@ footer{background:var(--surface);border-top:1px solid var(--border);padding:3rem
           </div>
           <div class="setting-row">
             <div class="setting-info"><h4>Delete Account</h4><p>Permanently remove all data</p></div>
-            <button class="panel-action" style="color:var(--red);border-color:rgba(239,68,68,.3)">Delete</button>
+            <button class="panel-action" style="color:var(--red);border-color:rgba(239,68,68,.3)" onclick="handleDeleteAccount()">Delete</button>
           </div>
         </div>
       </div>
@@ -853,7 +860,7 @@ let currentUser = null;  // populated after login / me-check
 
 function applyUser(user) {
   currentUser = user;
-  // Derive initials from name  e.g. "Arjun Kumar" → "AK"
+  // Derive initials from name  e.g. "YASH RANA" → ""
   const initials = (user.name || 'U').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
   const firstName = (user.name || 'Student').split(' ')[0];
   // Sidebar avatar + name
@@ -868,6 +875,18 @@ function applyUser(user) {
   const sem = document.getElementById('settingsEmail');
   if (sdn) sdn.value = user.name;
   if (sem) sem.textContent = user.email;
+  const loginBtn = document.getElementById('loginBtn');
+  const signupBtn = document.getElementById('signupBtn');
+
+  if (loginBtn) {
+    loginBtn.textContent = user.name.split(' ')[0];
+    loginBtn.onclick = () => showPage('dashboard');
+  }
+
+  if (signupBtn) {
+    signupBtn.textContent = 'Dashboard';
+    signupBtn.onclick = () => showPage('dashboard');
+  }
 }
 
 // ===== NAV =====
@@ -960,6 +979,10 @@ async function handleAuth(e){
     }
 
     applyUser(data.user);
+    await loadNotes();
+    await loadPreferences();
+    btn.textContent = mode === 'signup' ? 'Create Account →' : 'Log in →';
+    btn.disabled = false;
     showToast(`Welcome${mode === 'signup' ? '' : ' back'}, ${data.user.name.split(' ')[0]}!`, 'success');
     showPage('dashboard');
 
@@ -975,8 +998,21 @@ async function handleLogout(){
     await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
   } catch {}
   currentUser = null;
+  notes = [];
   showToast('Logged out', 'info');
   showPage('landing');
+  const loginBtn = document.getElementById('loginBtn');
+  const signupBtn = document.getElementById('signupBtn');
+
+  if (loginBtn) {
+    loginBtn.textContent = 'Log in';
+    loginBtn.onclick = () => showPage('auth');
+  }
+
+  if (signupBtn) {
+    signupBtn.textContent = 'Get Started';
+    signupBtn.onclick = () => showPage('auth');
+  }
 }
 
 // ===== DASHBOARD =====
@@ -1296,6 +1332,120 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Escape') closeCommand();
 });
 
+// ===== PREFERENCES (T5) =====
+async function loadPreferences() {
+  try {
+    const res = await fetch('/api/preferences', { credentials: 'same-origin' });
+    if (!res.ok) return;
+    const prefs = await res.json();
+    const n = document.getElementById('prefNotifications');
+    const r = document.getElementById('prefReminders');
+    const a = document.getElementById('prefAiSuggestions');
+    if (n) n.classList.toggle('on', !!prefs.notifications);
+    if (r) r.classList.toggle('on', !!prefs.reminders);
+    if (a) a.classList.toggle('on', !!prefs.aiSuggestions);
+  } catch {}
+}
+
+async function savePreferences() {
+  try {
+    const n = document.getElementById('prefNotifications');
+    const r = document.getElementById('prefReminders');
+    const a = document.getElementById('prefAiSuggestions');
+    await fetch('/api/preferences', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        notifications: n ? n.classList.contains('on') : true,
+        reminders:     r ? r.classList.contains('on') : false,
+        aiSuggestions: a ? a.classList.contains('on') : true,
+      }),
+    });
+  } catch {}
+}
+
+// ===== NOTES BACKEND SYNC (T6) =====
+async function loadNotes() {
+  try {
+    const res = await fetch('/api/notes', { credentials: 'same-origin' });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (Array.isArray(data) && data.length > 0) {
+      notes = data;
+      nextId = Math.max(...notes.map(n => n.id), 0) + 1;
+    }
+  } catch {}
+}
+
+// Override saveNote to also persist to backend
+const _origSaveNote = saveNote;
+saveNote = async function() {
+  const title   = document.getElementById('noteTitle').value.trim();
+  const content = document.getElementById('noteContent').value.trim();
+  const subject = document.getElementById('noteSubject').value;
+  if (!title) { showToast('Please add a title', 'error'); return; }
+  const today = new Date().toISOString().split('T')[0];
+  if (editingId) {
+    const n = notes.find(x => x.id === editingId);
+    n.title = title; n.content = content; n.subject = subject;
+    showToast('Note updated', 'success');
+  } else {
+    const newNote = { id: nextId++, title, subject, content, date: today };
+    notes.unshift(newNote);
+    showToast('Note saved', 'success');
+  }
+  closeNoteModal();
+  renderNotes();
+  // Persist to backend
+  try {
+    await fetch('/api/notes', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(notes),
+    });
+  } catch {}
+};
+
+// Override deleteNote to also persist to backend
+const _origDeleteNote = deleteNote;
+deleteNote = async function(id) {
+  notes = notes.filter(n => n.id !== id);
+  renderNotes();
+  showToast('Note deleted', 'info');
+  try {
+    await fetch('/api/notes/' + id, { method: 'DELETE', credentials: 'same-origin' });
+  } catch {}
+};
+
+// ===== DELETE ACCOUNT (T7) =====
+async function handleDeleteAccount() {
+  const confirmed = window.confirm(
+    'Are you sure you want to delete your account?\n\nThis will permanently remove all your notes, preferences, and account data. This cannot be undone.'
+  );
+  if (!confirmed) return;
+  try {
+    const res = await fetch('/api/account', { method: 'DELETE', credentials: 'same-origin' });
+    if (res.ok) {
+      currentUser = null;
+      notes = [];
+      showToast('Account deleted. Goodbye!', 'info');
+      // Reset navbar
+      const loginBtn  = document.getElementById('loginBtn');
+      const signupBtn = document.getElementById('signupBtn');
+      if (loginBtn)  { loginBtn.textContent  = 'Log in';      loginBtn.onclick  = () => showPage('auth'); }
+      if (signupBtn) { signupBtn.textContent = 'Get Started'; signupBtn.onclick = () => showPage('auth'); }
+      showPage('landing');
+    } else {
+      const data = await res.json().catch(() => ({}));
+      showToast(data.error || 'Could not delete account', 'error');
+    }
+  } catch {
+    showToast('Network error — is the server running?', 'error');
+  }
+}
+
 // ===== SESSION CHECK ON LOAD =====
 (async function checkSession() {
   try {
@@ -1303,8 +1453,9 @@ document.addEventListener('keydown',e=>{
     if (res.ok) {
       const data = await res.json();
       applyUser(data.user);
-      // If the URL has ?dashboard in it, or user was previously on dashboard, go straight there
-      if (window.location.search.includes('dashboard')) showPage('dashboard');
+      await loadNotes();
+      await loadPreferences();
+      showPage('dashboard');
     }
   } catch {
     // Server not running — silently ignore so static file open still works
@@ -1312,6 +1463,9 @@ document.addEventListener('keydown',e=>{
 })();
 
 // ===== INIT =====
+// Default nav button behaviour (overridden by applyUser when logged in)
+document.getElementById('loginBtn').onclick  = () => showPage('auth');
+document.getElementById('signupBtn').onclick = () => showPage('auth');
 renderNotes();
 renderActivityChart();
 setTimeout(renderHomeNotes, 50);

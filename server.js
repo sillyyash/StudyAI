@@ -29,6 +29,8 @@ const PORT        = process.env.PORT || 3000;
 const PUBLIC_DIR  = path.join(__dirname, 'public');
 const DATA_DIR    = path.join(__dirname, 'data');
 const USERS_FILE  = path.join(DATA_DIR, 'users.json');
+const NOTES_FILE  = path.join(DATA_DIR, 'notes.json');
+const PREFS_FILE  = path.join(DATA_DIR, 'preferences.json');
 const SESSION_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
 
 // ─── persistence helpers ──────────────────────────────────────────────────────
@@ -192,7 +194,7 @@ const server = http.createServer(async (req, res) => {
   // CORS for local dev (optional; remove in production behind same origin)
   res.setHeader('Access-Control-Allow-Origin',  req.headers.origin || '*');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
@@ -202,7 +204,13 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/api/auth/signup' && req.method === 'POST') return await handleSignup(req, res);
     if (pathname === '/api/auth/login'  && req.method === 'POST') return await handleLogin(req, res);
     if (pathname === '/api/auth/logout' && req.method === 'POST') return handleLogout(req, res);
-    if (pathname === '/api/auth/me'     && req.method === 'GET')  return handleMe(req, res);
+    if (pathname === '/api/auth/me'          && req.method === 'GET')    return handleMe(req, res);
+    if (pathname === '/api/preferences'        && req.method === 'GET')    return handleGetPreferences(req, res);
+    if (pathname === '/api/preferences'        && req.method === 'POST')   return await handleSavePreferences(req, res);
+    if (pathname === '/api/notes'              && req.method === 'GET')    return handleGetNotes(req, res);
+    if (pathname === '/api/notes'              && req.method === 'POST')   return await handleSaveNotes(req, res);
+    if (pathname.startsWith('/api/notes/')     && req.method === 'DELETE') return await handleDeleteNote(req, res, pathname.replace('/api/notes/', ''));
+    if (pathname === '/api/account'            && req.method === 'DELETE') return handleDeleteAccount(req, res);
     return serveStatic(req, res);
   } catch (err) {
     console.error('Unhandled error:', err);
@@ -215,3 +223,82 @@ server.listen(PORT, () => {
   console.log(`  Users file : ${USERS_FILE}`);
   console.log(`  Sessions   : in-memory (cleared on restart)\n`);
 });
+
+// ─── helpers shared by new routes ─────────────────────────────────────────────
+function requireAuth(req, res) {
+  const session = getSession(req);
+  if (!session) { json(res, 401, { error: 'Not authenticated.' }); return null; }
+  return session;
+}
+
+// ─── T5: preferences ──────────────────────────────────────────────────────────
+function handleGetPreferences(req, res) {
+  const session = requireAuth(req, res); if (!session) return;
+  const all   = loadJSON(PREFS_FILE, {});
+  const prefs = all[session.userId] || { notifications: true, reminders: false, aiSuggestions: true };
+  json(res, 200, prefs);
+}
+
+async function handleSavePreferences(req, res) {
+  const session = requireAuth(req, res); if (!session) return;
+  const body  = await readBody(req);
+  const all   = loadJSON(PREFS_FILE, {});
+  all[session.userId] = {
+    notifications: !!body.notifications,
+    reminders:     !!body.reminders,
+    aiSuggestions: !!body.aiSuggestions,
+  };
+  saveJSON(PREFS_FILE, all);
+  json(res, 200, { ok: true });
+}
+
+// ─── T6: notes ────────────────────────────────────────────────────────────────
+function handleGetNotes(req, res) {
+  const session = requireAuth(req, res); if (!session) return;
+  const all   = loadJSON(NOTES_FILE, {});
+  const notes = all[session.userId] || [];
+  json(res, 200, notes);
+}
+
+async function handleSaveNotes(req, res) {
+  const session = requireAuth(req, res); if (!session) return;
+  const body = await readBody(req);
+  if (!Array.isArray(body)) return json(res, 400, { error: 'Expected an array of notes.' });
+  const all = loadJSON(NOTES_FILE, {});
+  all[session.userId] = body;
+  saveJSON(NOTES_FILE, all);
+  json(res, 200, { ok: true });
+}
+
+async function handleDeleteNote(req, res, noteId) {
+  const session = requireAuth(req, res); if (!session) return;
+  const id  = parseInt(noteId, 10);
+  const all = loadJSON(NOTES_FILE, {});
+  all[session.userId] = (all[session.userId] || []).filter(n => n.id !== id);
+  saveJSON(NOTES_FILE, all);
+  json(res, 200, { ok: true });
+}
+
+// ─── T7: account deletion ─────────────────────────────────────────────────────
+function handleDeleteAccount(req, res) {
+  const session = requireAuth(req, res); if (!session) return;
+  const { userId, token } = session;
+
+  // Remove from users.json
+  const users = loadJSON(USERS_FILE, []);
+  saveJSON(USERS_FILE, users.filter(u => u.id !== userId));
+
+  // Remove preferences
+  const prefs = loadJSON(PREFS_FILE, {});
+  delete prefs[userId];
+  saveJSON(PREFS_FILE, prefs);
+
+  // Remove notes
+  const notes = loadJSON(NOTES_FILE, {});
+  delete notes[userId];
+  saveJSON(NOTES_FILE, notes);
+
+  // Destroy session
+  sessions.delete(token);
+  json(res, 200, { ok: true }, { 'Set-Cookie': setCookieHeader('', 0) });
+}
