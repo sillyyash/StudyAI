@@ -1,0 +1,13 @@
+{
+  "name": "studyai",
+  "version": "1.0.0",
+  "description": "StudyAI — local auth backend + frontend",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev":   "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
